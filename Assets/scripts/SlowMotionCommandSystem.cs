@@ -13,7 +13,9 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     private enum TechniqueType
     {
         DragonRise,
-        TornadoSpin
+        TornadoSpin,
+        Water,
+        Lightning
     }
 
     public int CurrentScore => score;
@@ -79,6 +81,12 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     private TechniqueType activeTechnique;
     private Texture2D radialTexture;
     private Sprite radialSprite;
+    private Texture2D elementTexture;
+    private Sprite elementSprite;
+    private Image elementDiamond;
+    private Text elementNameText;
+    private AudioSource elementChangeAudio;
+    private AudioClip elementChangeClip;
 
     private void Awake()
     {
@@ -87,6 +95,7 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         panController = GetComponent<PanTossController>();
         if (GetComponent<TornadoSpinTechnique>() == null)
             gameObject.AddComponent<TornadoSpinTechnique>();
+        CreateElementChangeAudio();
         BuildRuntimeUi();
         BuildGaugeUi();
         RefreshGaugeUi();
@@ -111,6 +120,9 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     {
         if (radialSprite != null) Destroy(radialSprite);
         if (radialTexture != null) Destroy(radialTexture);
+        if (elementSprite != null) Destroy(elementSprite);
+        if (elementTexture != null) Destroy(elementTexture);
+        if (elementChangeClip != null) Destroy(elementChangeClip);
     }
 
     private void Update()
@@ -118,16 +130,8 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         UpdateCooldown();
         if (!acceptingInput)
         {
-            if (!judgmentShowing && TechniqueOnePressed())
-            {
-                selectedTechnique = TechniqueType.DragonRise;
-                RefreshGaugeUi();
-            }
-            else if (!judgmentShowing && TechniqueTwoPressed())
-            {
-                selectedTechnique = TechniqueType.TornadoSpin;
-                RefreshGaugeUi();
-            }
+            if (!judgmentShowing)
+                UpdateElementSelection();
 
             if (!judgmentShowing && techniqueGauge >= 100f && CooldownReady() &&
                 panController != null && panController.CanActivateTechnique && TechniqueButtonPressed())
@@ -313,21 +317,61 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 #endif
     }
 
-    private static bool TechniqueOnePressed()
+    private void UpdateElementSelection()
+    {
+        if (FireElementPressed()) ChangeElement(TechniqueType.DragonRise);
+        else if (WindElementPressed()) ChangeElement(TechniqueType.TornadoSpin);
+        else if (WaterElementPressed()) ChangeElement(TechniqueType.Water);
+        else if (LightningElementPressed()) ChangeElement(TechniqueType.Lightning);
+    }
+
+    private void ChangeElement(TechniqueType element)
+    {
+        if (selectedTechnique == element)
+            return;
+
+        selectedTechnique = element;
+        if (elementChangeAudio != null && elementChangeClip != null)
+            elementChangeAudio.PlayOneShot(elementChangeClip, 0.72f);
+        RefreshElementDiamond();
+        RefreshGaugeUi();
+    }
+
+    private static bool FireElementPressed()
     {
 #if ENABLE_INPUT_SYSTEM
-        return Keyboard.current != null && Keyboard.current.digit1Key.wasPressedThisFrame;
+        return Keyboard.current != null &&
+               (Keyboard.current.upArrowKey.wasPressedThisFrame || Keyboard.current.digit1Key.wasPressedThisFrame);
 #else
-        return Input.GetKeyDown(KeyCode.Alpha1);
+        return Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.Alpha1);
 #endif
     }
 
-    private static bool TechniqueTwoPressed()
+    private static bool WindElementPressed()
     {
 #if ENABLE_INPUT_SYSTEM
-        return Keyboard.current != null && Keyboard.current.digit2Key.wasPressedThisFrame;
+        return Keyboard.current != null &&
+               (Keyboard.current.leftArrowKey.wasPressedThisFrame || Keyboard.current.digit2Key.wasPressedThisFrame);
 #else
-        return Input.GetKeyDown(KeyCode.Alpha2);
+        return Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.Alpha2);
+#endif
+    }
+
+    private static bool WaterElementPressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.downArrowKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.DownArrow);
+#endif
+    }
+
+    private static bool LightningElementPressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.rightArrowKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.RightArrow);
 #endif
     }
 
@@ -420,6 +464,109 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         outline.effectDistance = new Vector2(2f, -2f);
 
         BuildCornerHud(root.transform);
+        BuildElementDiamondUi(root.transform);
+    }
+
+    private void BuildElementDiamondUi(Transform hudRoot)
+    {
+        GameObject diamondObject = new GameObject("ElementDiamond");
+        diamondObject.transform.SetParent(hudRoot, false);
+        RectTransform rect = diamondObject.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.zero;
+        rect.pivot = Vector2.zero;
+        rect.anchoredPosition = new Vector2(34f, 42f);
+        rect.sizeDelta = new Vector2(176f, 176f);
+        elementDiamond = diamondObject.AddComponent<Image>();
+        elementDiamond.raycastTarget = false;
+
+        elementTexture = new Texture2D(128, 128, TextureFormat.RGBA32, false);
+        elementTexture.name = "Runtime Element Diamond";
+        elementTexture.filterMode = FilterMode.Bilinear;
+        elementSprite = Sprite.Create(elementTexture, new Rect(0f, 0f, 128f, 128f),
+            new Vector2(0.5f, 0.5f), 128f);
+        elementDiamond.sprite = elementSprite;
+
+        CreateElementLabel("FireLabel", "火  ↑", hudRoot, new Vector2(122f, 210f));
+        CreateElementLabel("WindLabel", "←  風", hudRoot, new Vector2(48f, 132f));
+        CreateElementLabel("WaterLabel", "水  ↓", hudRoot, new Vector2(122f, 55f));
+        CreateElementLabel("LightningLabel", "雷  →", hudRoot, new Vector2(197f, 132f));
+
+        elementNameText = CreateText("SelectedElementName", hudRoot, Vector2.zero, 23);
+        elementNameText.fontStyle = FontStyle.Bold;
+        elementNameText.alignment = TextAnchor.MiddleCenter;
+        elementNameText.rectTransform.pivot = Vector2.zero;
+        elementNameText.rectTransform.anchoredPosition = new Vector2(10f, 230f);
+        elementNameText.rectTransform.sizeDelta = new Vector2(260f, 38f);
+        Outline nameOutline = elementNameText.gameObject.AddComponent<Outline>();
+        nameOutline.effectColor = Color.black;
+        nameOutline.effectDistance = new Vector2(2f, -2f);
+        RefreshElementDiamond();
+    }
+
+    private static void CreateElementLabel(string name, string label, Transform parent, Vector2 position)
+    {
+        Text text = CreateText(name, parent, Vector2.zero, 21);
+        text.text = label;
+        text.fontStyle = FontStyle.Bold;
+        text.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        text.rectTransform.anchoredPosition = position;
+        text.rectTransform.sizeDelta = new Vector2(90f, 34f);
+        Outline outline = text.gameObject.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(2f, -2f);
+    }
+
+    private void RefreshElementDiamond()
+    {
+        if (elementTexture == null)
+            return;
+
+        Color fire = ElementColor(TechniqueType.DragonRise, new Color(1f, 0.16f, 0.03f));
+        Color wind = ElementColor(TechniqueType.TornadoSpin, new Color(0.08f, 0.95f, 0.22f));
+        Color water = ElementColor(TechniqueType.Water, new Color(0.05f, 0.48f, 1f));
+        Color lightning = ElementColor(TechniqueType.Lightning, new Color(1f, 0.82f, 0.04f));
+        Color[] pixels = new Color[elementTexture.width * elementTexture.height];
+        for (int y = 0; y < elementTexture.height; y++)
+        {
+            for (int x = 0; x < elementTexture.width; x++)
+            {
+                float nx = (x + 0.5f) / elementTexture.width * 2f - 1f;
+                float ny = (y + 0.5f) / elementTexture.height * 2f - 1f;
+                float distance = Mathf.Abs(nx) + Mathf.Abs(ny);
+                Color color = Color.clear;
+                if (distance <= 1f)
+                {
+                    if (distance > 0.92f || Mathf.Abs(Mathf.Abs(nx) - Mathf.Abs(ny)) < 0.025f)
+                        color = new Color(0.015f, 0.015f, 0.02f, 1f);
+                    else if (Mathf.Abs(nx) > Mathf.Abs(ny))
+                        color = nx < 0f ? wind : lightning;
+                    else
+                        color = ny > 0f ? fire : water;
+                }
+                pixels[y * elementTexture.width + x] = color;
+            }
+        }
+        elementTexture.SetPixels(pixels);
+        elementTexture.Apply();
+
+        if (elementNameText == null)
+            return;
+        if (selectedTechnique == TechniqueType.DragonRise)
+            elementNameText.text = "FIRE  /  RYU-SHO-HAN";
+        else if (selectedTechnique == TechniqueType.TornadoSpin)
+            elementNameText.text = "WIND  /  TATSUMAKI-SENSHO";
+        else if (selectedTechnique == TechniqueType.Water)
+            elementNameText.text = "WATER  /  NO TECHNIQUE";
+        else
+            elementNameText.text = "LIGHTNING  /  NO TECHNIQUE";
+    }
+
+    private Color ElementColor(TechniqueType element, Color baseColor)
+    {
+        return selectedTechnique == element
+            ? baseColor
+            : Color.Lerp(new Color(0.03f, 0.035f, 0.04f, 1f), baseColor, 0.28f);
     }
 
     private void BuildCornerHud(Transform hudRoot)
@@ -522,9 +669,19 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
             : Color.white;
     }
 
-    private string SelectedTechniqueLabel => selectedTechnique == TechniqueType.DragonRise
-        ? gaugeLabel + "  [1] RYU-SHO-HAN   2 TATSUMAKI-SENSHO"
-        : gaugeLabel + "  1 RYU-SHO-HAN   [2] TATSUMAKI-SENSHO";
+    private string SelectedTechniqueLabel
+    {
+        get
+        {
+            if (selectedTechnique == TechniqueType.DragonRise)
+                return gaugeLabel + "  FIRE / RYU-SHO-HAN";
+            if (selectedTechnique == TechniqueType.TornadoSpin)
+                return gaugeLabel + "  WIND / TATSUMAKI-SENSHO";
+            if (selectedTechnique == TechniqueType.Water)
+                return gaugeLabel + "  WATER / NO TECHNIQUE";
+            return gaugeLabel + "  LIGHTNING / NO TECHNIQUE";
+        }
+    }
 
     private void UpdateCooldown()
     {
@@ -550,9 +707,44 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 
     private bool CooldownReady()
     {
-        return selectedTechnique == TechniqueType.DragonRise
-            ? dragonCooldownElapsed >= cooldownDuration
-            : tornadoCooldownElapsed >= cooldownDuration;
+        if (selectedTechnique == TechniqueType.DragonRise)
+            return dragonCooldownElapsed >= cooldownDuration;
+        if (selectedTechnique == TechniqueType.TornadoSpin)
+            return tornadoCooldownElapsed >= cooldownDuration;
+        return false;
+    }
+
+    private void CreateElementChangeAudio()
+    {
+        elementChangeAudio = gameObject.AddComponent<AudioSource>();
+        elementChangeAudio.playOnAwake = false;
+        elementChangeAudio.loop = false;
+        elementChangeAudio.spatialBlend = 0f;
+        elementChangeAudio.volume = 0.9f;
+        elementChangeClip = CreateElementChangeClip();
+    }
+
+    private static AudioClip CreateElementChangeClip()
+    {
+        const int sampleRate = 44100;
+        const float duration = 0.42f;
+        int sampleCount = Mathf.CeilToInt(sampleRate * duration);
+        float[] samples = new float[sampleCount];
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float time = i / (float)sampleRate;
+            float attack = Mathf.Clamp01(time / 0.008f);
+            float decay = Mathf.Exp(-time * 8.5f);
+            float shimmer = Mathf.Sin(2f * Mathf.PI * 1320f * time) * 0.42f
+                + Mathf.Sin(2f * Mathf.PI * 1980f * time) * 0.25f
+                + Mathf.Sin(2f * Mathf.PI * 2640f * time) * 0.14f;
+            float strike = Mathf.Sin(2f * Mathf.PI * 740f * time) * Mathf.Exp(-time * 20f) * 0.35f;
+            samples[i] = Mathf.Clamp((shimmer * decay + strike) * attack, -1f, 1f);
+        }
+
+        AudioClip clip = AudioClip.Create("Element Change Chakiin", sampleCount, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
     }
 
     private void RefreshCornerHud()
