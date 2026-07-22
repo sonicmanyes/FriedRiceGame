@@ -10,13 +10,20 @@ using UnityEngine.InputSystem;
 [DisallowMultipleComponent]
 public sealed class SlowMotionCommandSystem : MonoBehaviour
 {
+    private enum TechniqueType
+    {
+        DragonRise,
+        TornadoSpin
+    }
+
     public int CurrentScore => score;
     public bool IsBusy => acceptingInput || judgmentShowing;
     public event Action<bool> CommandFinished;
     public event Action DragonRiseRequested;
+    public event Action TornadoSpinRequested;
 
     [SerializeField, Range(0.05f, 0.5f)] private float slowScale = 0.18f;
-    [SerializeField, Min(0.5f)] private float commandTime = 2.8f;
+    [SerializeField, Min(0.5f)] private float commandTime = 3.5f;
 
     [Header("Technique gauge")]
     [SerializeField, Range(1f, 100f)] private float gaugeGainPerToss = 25f;
@@ -24,14 +31,16 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     [Header("Score and cooldown")]
     [SerializeField, Min(1f)] private float cooldownDuration = 10f;
     [SerializeField] private int tossScore = 100;
-    [SerializeField] private int techniqueSuccessScore = 1000;
+    [SerializeField] private int dragonRiseSuccessScore = 1000;
+    [SerializeField] private int tornadoSpinBaseScore = 300;
 
     [Header("Editable UI text")]
     [SerializeField] private string gaugeLabel = "TECHNIQUE";
     [SerializeField] private string slowMotionLabel = "SLOW MOTION";
     [SerializeField] private string successLabel = "COMMAND SUCCESS";
     [SerializeField] private string failedLabel = "COMMAND FAILED";
-    [SerializeField] private string techniqueName = "RYU-SHO-HAN!";
+    [SerializeField] private string dragonRiseName = "RYU-SHO-HAN!";
+    [SerializeField] private string tornadoSpinName = "TATSUMAKI-SENSHO!";
 
     [Header("Editable gauge appearance")]
     [SerializeField, Range(20, 72)] private int gaugeFontSize = 42;
@@ -40,7 +49,8 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     [SerializeField] private Color gaugeColor = new Color(1f, 0.28f, 0.03f, 1f);
     [SerializeField] private Color gaugeMaxColor = new Color(1f, 0.72f, 0.12f, 1f);
 
-    private readonly string[] labels = { "A", "D", "W", "SPACE" };
+    private readonly string[] dragonRiseLabels = { "A", "D", "W", "SPACE" };
+    private readonly string[] tornadoSpinLabels = { "A", "A", "D", "D", "W", "W", "A" };
     private PanTossController panController;
     private Canvas canvas;
     private Text titleText;
@@ -51,8 +61,10 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     private RectTransform gaugeFillRect;
     private Text gaugeText;
     private Text scoreText;
-    private Image cooldownFill;
-    private Text cooldownText;
+    private Image dragonCooldownFill;
+    private Text dragonCooldownText;
+    private Image tornadoCooldownFill;
+    private Text tornadoCooldownText;
     private int commandIndex;
     private float remainingTime;
     private float inputArmTime;
@@ -60,19 +72,26 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     private bool acceptingInput;
     private bool judgmentShowing;
     private float techniqueGauge;
-    private float cooldownElapsed;
+    private float dragonCooldownElapsed;
+    private float tornadoCooldownElapsed;
     private int score;
+    private TechniqueType selectedTechnique = TechniqueType.DragonRise;
+    private TechniqueType activeTechnique;
     private Texture2D radialTexture;
     private Sprite radialSprite;
 
     private void Awake()
     {
         normalFixedDeltaTime = Time.fixedDeltaTime;
+        commandTime = Mathf.Max(commandTime, 3.5f);
         panController = GetComponent<PanTossController>();
+        if (GetComponent<TornadoSpinTechnique>() == null)
+            gameObject.AddComponent<TornadoSpinTechnique>();
         BuildRuntimeUi();
         BuildGaugeUi();
         RefreshGaugeUi();
-        cooldownElapsed = 0f;
+        dragonCooldownElapsed = 0f;
+        tornadoCooldownElapsed = 0f;
         RefreshCornerHud();
     }
 
@@ -99,6 +118,17 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         UpdateCooldown();
         if (!acceptingInput)
         {
+            if (!judgmentShowing && TechniqueOnePressed())
+            {
+                selectedTechnique = TechniqueType.DragonRise;
+                RefreshGaugeUi();
+            }
+            else if (!judgmentShowing && TechniqueTwoPressed())
+            {
+                selectedTechnique = TechniqueType.TornadoSpin;
+                RefreshGaugeUi();
+            }
+
             if (!judgmentShowing && techniqueGauge >= 100f && CooldownReady() &&
                 panController != null && panController.CanActivateTechnique && TechniqueButtonPressed())
             {
@@ -122,7 +152,7 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         {
             commandIndex++;
             RefreshCommandText();
-            if (commandIndex >= labels.Length) Complete(true, techniqueName);
+            if (commandIndex >= ActiveLabels.Length) Complete(true, ActiveTechniqueName);
         }
         else if (AnyCommandKeyPressed())
         {
@@ -147,6 +177,7 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         if (acceptingInput) return;
         if (panController != null) panController.SetControlLocked(true);
         StopAllCoroutines();
+        activeTechnique = selectedTechnique;
         commandIndex = 0;
         remainingTime = commandTime;
         inputArmTime = Time.unscaledTime + 0.10f;
@@ -202,11 +233,28 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         CommandFinished?.Invoke(success);
         if (success)
         {
-            score += techniqueSuccessScore;
-            cooldownElapsed = 0f;
+            score += activeTechnique == TechniqueType.DragonRise
+                ? dragonRiseSuccessScore
+                : tornadoSpinBaseScore;
+            if (activeTechnique == TechniqueType.DragonRise)
+                dragonCooldownElapsed = 0f;
+            else
+                tornadoCooldownElapsed = 0f;
             RefreshCornerHud();
-            DragonRiseRequested?.Invoke();
+            if (activeTechnique == TechniqueType.DragonRise)
+                DragonRiseRequested?.Invoke();
+            else
+                TornadoSpinRequested?.Invoke();
         }
+    }
+
+    public void AddTechniqueScore(int points)
+    {
+        if (points <= 0)
+            return;
+
+        score += points;
+        RefreshCornerHud();
     }
 
     private void RestoreTime()
@@ -219,19 +267,29 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     {
 #if ENABLE_INPUT_SYSTEM
         if (Keyboard.current == null) return false;
-        switch (commandIndex)
-        {
-            case 0: return Keyboard.current.aKey.wasPressedThisFrame;
-            case 1: return Keyboard.current.dKey.wasPressedThisFrame;
-            case 2: return Keyboard.current.wKey.wasPressedThisFrame;
-            case 3: return Keyboard.current.spaceKey.wasPressedThisFrame;
-            default: return false;
-        }
+        string expected = commandIndex < ActiveLabels.Length ? ActiveLabels[commandIndex] : string.Empty;
+        if (expected == "A") return Keyboard.current.aKey.wasPressedThisFrame;
+        if (expected == "D") return Keyboard.current.dKey.wasPressedThisFrame;
+        if (expected == "W") return Keyboard.current.wKey.wasPressedThisFrame;
+        if (expected == "SPACE") return Keyboard.current.spaceKey.wasPressedThisFrame;
+        return false;
 #else
-        KeyCode[] keys = { KeyCode.A, KeyCode.D, KeyCode.W, KeyCode.Space };
-        return commandIndex < keys.Length && Input.GetKeyDown(keys[commandIndex]);
+        string expected = commandIndex < ActiveLabels.Length ? ActiveLabels[commandIndex] : string.Empty;
+        if (expected == "A") return Input.GetKeyDown(KeyCode.A);
+        if (expected == "D") return Input.GetKeyDown(KeyCode.D);
+        if (expected == "W") return Input.GetKeyDown(KeyCode.W);
+        if (expected == "SPACE") return Input.GetKeyDown(KeyCode.Space);
+        return false;
 #endif
     }
+
+    private string[] ActiveLabels => activeTechnique == TechniqueType.DragonRise
+        ? dragonRiseLabels
+        : tornadoSpinLabels;
+
+    private string ActiveTechniqueName => activeTechnique == TechniqueType.DragonRise
+        ? dragonRiseName
+        : tornadoSpinName;
 
     private static bool AnyCommandKeyPressed()
     {
@@ -255,9 +313,28 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 #endif
     }
 
+    private static bool TechniqueOnePressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.digit1Key.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.Alpha1);
+#endif
+    }
+
+    private static bool TechniqueTwoPressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.digit2Key.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.Alpha2);
+#endif
+    }
+
     private void RefreshCommandText()
     {
         var builder = new StringBuilder();
+        string[] labels = ActiveLabels;
         for (int i = 0; i < labels.Length; i++)
         {
             if (i > 0) builder.Append("  >  ");
@@ -335,9 +412,9 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         gaugeFill.color = gaugeColor;
 
         Vector2 labelAnchor = gaugeAnchor + new Vector2(0f, 0.075f);
-        gaugeText = CreateText("GaugeLabel", root.transform, labelAnchor, gaugeFontSize);
+        gaugeText = CreateText("GaugeLabel", root.transform, labelAnchor, Mathf.Min(gaugeFontSize, 30));
         gaugeText.fontStyle = FontStyle.Bold;
-        gaugeText.rectTransform.sizeDelta = new Vector2(760f, 60f);
+        gaugeText.rectTransform.sizeDelta = new Vector2(1160f, 60f);
         Outline outline = gaugeText.gameObject.AddComponent<Outline>();
         outline.effectColor = new Color(0f, 0f, 0f, 0.95f);
         outline.effectDistance = new Vector2(2f, -2f);
@@ -357,42 +434,62 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         scoreOutline.effectColor = Color.black;
         scoreOutline.effectDistance = new Vector2(2f, -2f);
 
-        GameObject cooldownBackgroundObject = new GameObject("TechniqueCooldownBackground");
-        cooldownBackgroundObject.transform.SetParent(hudRoot, false);
-        RectTransform backgroundRect = cooldownBackgroundObject.AddComponent<RectTransform>();
+        Sprite cooldownSprite = CreateRuntimeSquareSprite();
+        CreateCooldownHud(hudRoot, "DragonRise", new Vector2(-38f, -32f),
+            new Color(0.9f, 0.05f, 0.025f, 1f), "RYU-SHO",
+            cooldownSprite, out dragonCooldownFill, out dragonCooldownText);
+        CreateCooldownHud(hudRoot, "TornadoSpin", new Vector2(-174f, -32f),
+            new Color(0.08f, 0.9f, 0.2f, 1f), "TORNADO",
+            cooldownSprite, out tornadoCooldownFill, out tornadoCooldownText);
+    }
+
+    private static void CreateCooldownHud(Transform hudRoot, string prefix, Vector2 position,
+        Color fillColor, string label, Sprite sprite, out Image fill, out Text statusText)
+    {
+        GameObject backgroundObject = new GameObject(prefix + "CooldownBackground");
+        backgroundObject.transform.SetParent(hudRoot, false);
+        RectTransform backgroundRect = backgroundObject.AddComponent<RectTransform>();
         backgroundRect.anchorMin = Vector2.one;
         backgroundRect.anchorMax = Vector2.one;
         backgroundRect.pivot = Vector2.one;
-        backgroundRect.anchoredPosition = new Vector2(-38f, -32f);
+        backgroundRect.anchoredPosition = position;
         backgroundRect.sizeDelta = new Vector2(112f, 112f);
-        Image background = cooldownBackgroundObject.AddComponent<Image>();
+        Image background = backgroundObject.AddComponent<Image>();
         background.color = new Color(0.015f, 0.015f, 0.02f, 0.94f);
 
-        GameObject cooldownFillObject = new GameObject("TechniqueCooldownRadialFill");
-        cooldownFillObject.transform.SetParent(cooldownBackgroundObject.transform, false);
-        RectTransform fillRect = cooldownFillObject.AddComponent<RectTransform>();
+        GameObject fillObject = new GameObject(prefix + "CooldownRadialFill");
+        fillObject.transform.SetParent(backgroundObject.transform, false);
+        RectTransform fillRect = fillObject.AddComponent<RectTransform>();
         fillRect.anchorMin = new Vector2(0.06f, 0.06f);
         fillRect.anchorMax = new Vector2(0.94f, 0.94f);
         fillRect.offsetMin = Vector2.zero;
         fillRect.offsetMax = Vector2.zero;
-        cooldownFill = cooldownFillObject.AddComponent<Image>();
-        cooldownFill.sprite = CreateRuntimeSquareSprite();
-        cooldownFill.color = new Color(0.9f, 0.05f, 0.025f, 1f);
-        cooldownFill.type = Image.Type.Filled;
-        cooldownFill.fillMethod = Image.FillMethod.Radial360;
-        cooldownFill.fillOrigin = 2;
-        cooldownFill.fillClockwise = true;
-        cooldownFill.fillAmount = 0f;
+        fill = fillObject.AddComponent<Image>();
+        fill.sprite = sprite;
+        fill.color = fillColor;
+        fill.type = Image.Type.Filled;
+        fill.fillMethod = Image.FillMethod.Radial360;
+        fill.fillOrigin = 2;
+        fill.fillClockwise = true;
+        fill.fillAmount = 0f;
 
-        cooldownText = CreateText("TechniqueCooldownText", hudRoot, Vector2.one, 30);
-        cooldownText.fontStyle = FontStyle.Bold;
-        cooldownText.alignment = TextAnchor.UpperRight;
-        cooldownText.rectTransform.pivot = Vector2.one;
-        cooldownText.rectTransform.anchoredPosition = new Vector2(-38f, -151f);
-        cooldownText.rectTransform.sizeDelta = new Vector2(260f, 50f);
-        Outline cooldownOutline = cooldownText.gameObject.AddComponent<Outline>();
-        cooldownOutline.effectColor = Color.black;
-        cooldownOutline.effectDistance = new Vector2(2f, -2f);
+        Text nameText = CreateText(prefix + "CooldownName", hudRoot, Vector2.one, 17);
+        nameText.text = label;
+        nameText.fontStyle = FontStyle.Bold;
+        nameText.alignment = TextAnchor.UpperRight;
+        nameText.rectTransform.pivot = Vector2.one;
+        nameText.rectTransform.anchoredPosition = position + new Vector2(0f, -116f);
+        nameText.rectTransform.sizeDelta = new Vector2(112f, 25f);
+
+        statusText = CreateText(prefix + "CooldownStatus", hudRoot, Vector2.one, 21);
+        statusText.fontStyle = FontStyle.Bold;
+        statusText.alignment = TextAnchor.UpperRight;
+        statusText.rectTransform.pivot = Vector2.one;
+        statusText.rectTransform.anchoredPosition = position + new Vector2(0f, -140f);
+        statusText.rectTransform.sizeDelta = new Vector2(112f, 36f);
+        Outline outline = statusText.gameObject.AddComponent<Outline>();
+        outline.effectColor = Color.black;
+        outline.effectDistance = new Vector2(2f, -2f);
     }
 
     private Sprite CreateRuntimeSquareSprite()
@@ -418,18 +515,34 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         gaugeFillRect.offsetMin = Vector2.zero;
         gaugeFillRect.offsetMax = Vector2.zero;
         gaugeText.text = techniqueGauge >= 100f
-            ? gaugeLabel + (CooldownReady() ? "  MAX!  [P]" : "  MAX!  WAIT")
-            : gaugeLabel + "  " + Mathf.RoundToInt(techniqueGauge) + "%";
+            ? SelectedTechniqueLabel + (CooldownReady() ? "  MAX!  [P]" : "  MAX!  WAIT")
+            : SelectedTechniqueLabel + "  " + Mathf.RoundToInt(techniqueGauge) + "%";
         gaugeText.color = techniqueGauge >= 100f
             ? gaugeMaxColor
             : Color.white;
     }
 
+    private string SelectedTechniqueLabel => selectedTechnique == TechniqueType.DragonRise
+        ? gaugeLabel + "  [1] RYU-SHO-HAN   2 TATSUMAKI-SENSHO"
+        : gaugeLabel + "  1 RYU-SHO-HAN   [2] TATSUMAKI-SENSHO";
+
     private void UpdateCooldown()
     {
-        if (cooldownElapsed < cooldownDuration)
+        bool changed = false;
+        if (dragonCooldownElapsed < cooldownDuration)
         {
-            cooldownElapsed = Mathf.Min(cooldownDuration, cooldownElapsed + Time.unscaledDeltaTime);
+            dragonCooldownElapsed = Mathf.Min(
+                cooldownDuration, dragonCooldownElapsed + Time.unscaledDeltaTime);
+            changed = true;
+        }
+        if (tornadoCooldownElapsed < cooldownDuration)
+        {
+            tornadoCooldownElapsed = Mathf.Min(
+                cooldownDuration, tornadoCooldownElapsed + Time.unscaledDeltaTime);
+            changed = true;
+        }
+        if (changed)
+        {
             RefreshCornerHud();
             RefreshGaugeUi();
         }
@@ -437,7 +550,9 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 
     private bool CooldownReady()
     {
-        return cooldownElapsed >= cooldownDuration;
+        return selectedTechnique == TechniqueType.DragonRise
+            ? dragonCooldownElapsed >= cooldownDuration
+            : tornadoCooldownElapsed >= cooldownDuration;
     }
 
     private void RefreshCornerHud()
@@ -445,20 +560,29 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         if (scoreText != null)
             scoreText.text = "SCORE  " + score.ToString("D7");
 
-        if (cooldownFill == null || cooldownText == null)
+        if (dragonCooldownFill == null || dragonCooldownText == null ||
+            tornadoCooldownFill == null || tornadoCooldownText == null)
             return;
 
-        float ratio = cooldownDuration > 0f ? Mathf.Clamp01(cooldownElapsed / cooldownDuration) : 1f;
-        cooldownFill.fillAmount = ratio;
+        RefreshCooldownDisplay(dragonCooldownFill, dragonCooldownText, dragonCooldownElapsed,
+            new Color(1f, 0.72f, 0.12f));
+        RefreshCooldownDisplay(tornadoCooldownFill, tornadoCooldownText, tornadoCooldownElapsed,
+            new Color(0.35f, 1f, 0.35f));
+    }
+
+    private void RefreshCooldownDisplay(Image fill, Text statusText, float elapsed, Color readyColor)
+    {
+        float ratio = cooldownDuration > 0f ? Mathf.Clamp01(elapsed / cooldownDuration) : 1f;
+        fill.fillAmount = ratio;
         if (ratio >= 1f)
         {
-            cooldownText.text = "READY";
-            cooldownText.color = new Color(1f, 0.72f, 0.12f);
+            statusText.text = "READY";
+            statusText.color = readyColor;
         }
         else
         {
-            cooldownText.text = (cooldownDuration - cooldownElapsed).ToString("0.0") + "s";
-            cooldownText.color = Color.white;
+            statusText.text = (cooldownDuration - elapsed).ToString("0.0") + "s";
+            statusText.color = Color.white;
         }
     }
 

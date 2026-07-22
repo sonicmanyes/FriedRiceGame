@@ -19,6 +19,7 @@ public sealed class GameSessionController : MonoBehaviour
     private PanTossController panController;
     private SlowMotionCommandSystem commandSystem;
     private DragonRiseTechnique dragonTechnique;
+    private TornadoSpinTechnique tornadoTechnique;
     private Text timerText;
     private Text countdownText;
     private GameObject resultRoot;
@@ -34,6 +35,7 @@ public sealed class GameSessionController : MonoBehaviour
         panController = GetComponent<PanTossController>();
         commandSystem = GetComponent<SlowMotionCommandSystem>();
         dragonTechnique = GetComponent<DragonRiseTechnique>();
+        tornadoTechnique = GetComponent<TornadoSpinTechnique>();
         BuildUi();
     }
 
@@ -67,7 +69,10 @@ public sealed class GameSessionController : MonoBehaviour
         }
         else if (waitingToFinish)
         {
-            if (!commandSystem.IsBusy && !dragonTechnique.IsPerforming)
+            if (tornadoTechnique == null)
+                tornadoTechnique = GetComponent<TornadoSpinTechnique>();
+            if (!commandSystem.IsBusy && !dragonTechnique.IsPerforming &&
+                (tornadoTechnique == null || !tornadoTechnique.IsPerforming))
                 ShowResult();
         }
         else if (resultShown && RetryPressed())

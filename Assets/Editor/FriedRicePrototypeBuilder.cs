@@ -42,6 +42,8 @@ public static class FriedRicePrototypeBuilder
                     pan.AddComponent<SlowMotionCommandSystem>();
                 if (pan.GetComponent<DragonRiseTechnique>() == null)
                     pan.AddComponent<DragonRiseTechnique>();
+                if (pan.GetComponent<TornadoSpinTechnique>() == null)
+                    pan.AddComponent<TornadoSpinTechnique>();
                 if (pan.GetComponent<PanCookingAudio>() == null)
                     pan.AddComponent<PanCookingAudio>();
                 if (pan.GetComponent<GameSessionController>() == null)
@@ -49,9 +51,17 @@ public static class FriedRicePrototypeBuilder
 
                 SlowMotionCommandSystem commandSystem = pan.GetComponent<SlowMotionCommandSystem>();
                 SerializedObject commandData = new SerializedObject(commandSystem);
-                commandData.FindProperty("commandTime").floatValue = 2.8f;
+                commandData.FindProperty("commandTime").floatValue = 3.5f;
                 commandData.FindProperty("gaugeGainPerToss").floatValue = 25f;
                 commandData.ApplyModifiedPropertiesWithoutUndo();
+
+                TornadoSpinTechnique tornadoTechnique = pan.GetComponent<TornadoSpinTechnique>();
+                SerializedObject tornadoData = new SerializedObject(tornadoTechnique);
+                tornadoData.FindProperty("mashDuration").floatValue = 3.5f;
+                tornadoData.FindProperty("stageTwoMashes").intValue = 6;
+                tornadoData.FindProperty("stageThreeMashes").intValue = 12;
+                tornadoData.FindProperty("maximumScoringMashes").intValue = 18;
+                tornadoData.ApplyModifiedPropertiesWithoutUndo();
 
                 DragonRiseTechnique dragonTechnique = pan.GetComponent<DragonRiseTechnique>();
                 SerializedObject dragonData = new SerializedObject(dragonTechnique);
@@ -163,6 +173,7 @@ public static class FriedRicePrototypeBuilder
         root.AddComponent<RiceGuideTube>();
         root.AddComponent<SlowMotionCommandSystem>();
         root.AddComponent<DragonRiseTechnique>();
+        root.AddComponent<TornadoSpinTechnique>();
         root.AddComponent<PanCookingAudio>();
         root.AddComponent<GameSessionController>();
 
