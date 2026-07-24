@@ -28,7 +28,15 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     [SerializeField, Min(0.5f)] private float commandTime = 3.5f;
 
     [Header("Technique gauge")]
-    [SerializeField, Range(1f, 100f)] private float gaugeGainPerToss = 25f;
+    [SerializeField, Range(1f, 100f)] private float goodGaugeGain = 5f;
+    [SerializeField, Range(1f, 100f)] private float greatGaugeGain = 10f;
+    [SerializeField, Range(1f, 100f)] private float perfectGaugeGain = 15f;
+
+    [Header("Toss timing")]
+    [Tooltip("PERFECTの中心。鍋振り終了から次に振るまでの秒数。")]
+    [SerializeField, Min(0f)] private float perfectLandingDelay = 0.45f;
+    [SerializeField, Range(0.05f, 0.5f)] private float perfectTimingWindow = 0.16f;
+    [SerializeField, Range(0.1f, 1f)] private float greatTimingWindow = 0.38f;
 
     [Header("Score and cooldown")]
     [SerializeField, Min(1f)] private float cooldownDuration = 10f;
@@ -62,6 +70,7 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     private Image gaugeFill;
     private RectTransform gaugeFillRect;
     private Text gaugeText;
+    private Text tossTimingText;
     private Text scoreText;
     private Image dragonCooldownFill;
     private Text dragonCooldownText;
@@ -77,6 +86,9 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
     private float dragonCooldownElapsed;
     private float tornadoCooldownElapsed;
     private int score;
+    private float lastTossFinishedTime;
+    private bool hasFinishedPreviousToss;
+    private Coroutine tossTimingRoutine;
     private TechniqueType selectedTechnique = TechniqueType.DragonRise;
     private TechniqueType activeTechnique;
     private Texture2D radialTexture;
@@ -106,12 +118,20 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 
     private void OnEnable()
     {
-        if (panController != null) panController.TossStarted += HandleTossStarted;
+        if (panController != null)
+        {
+            panController.TossStarted += HandleTossStarted;
+            panController.TossFinished += HandleTossFinished;
+        }
     }
 
     private void OnDisable()
     {
-        if (panController != null) panController.TossStarted -= HandleTossStarted;
+        if (panController != null)
+        {
+            panController.TossStarted -= HandleTossStarted;
+            panController.TossFinished -= HandleTossFinished;
+        }
         if (panController != null) panController.SetControlLocked(false);
         RestoreTime();
     }
@@ -166,14 +186,71 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 
     private void HandleTossStarted()
     {
-        if (acceptingInput)
+        if (acceptingInput || (panController != null && panController.IsTechniqueToss))
             return;
 
-        techniqueGauge = Mathf.Min(100f, techniqueGauge + gaugeGainPerToss);
+        float elapsedAfterLanding = hasFinishedPreviousToss
+            ? Time.unscaledTime - lastTossFinishedTime
+            : float.PositiveInfinity;
+        float timingError = Mathf.Abs(elapsedAfterLanding - perfectLandingDelay);
+        string rating;
+        float gaugeGain;
+        Color ratingColor;
+
+        if (hasFinishedPreviousToss && timingError <= perfectTimingWindow)
+        {
+            rating = "PERFECT";
+            gaugeGain = perfectGaugeGain;
+            ratingColor = new Color(1f, 0.72f, 0.08f);
+        }
+        else if (hasFinishedPreviousToss && timingError <= greatTimingWindow)
+        {
+            rating = "GREAT";
+            gaugeGain = greatGaugeGain;
+            ratingColor = new Color(0.25f, 0.9f, 1f);
+        }
+        else
+        {
+            rating = "GOOD";
+            gaugeGain = goodGaugeGain;
+            ratingColor = Color.white;
+        }
+
+        techniqueGauge = Mathf.Min(100f, techniqueGauge + gaugeGain);
         score += tossScore;
         RefreshGaugeUi();
         RefreshCornerHud();
+        ShowTossTiming(rating, gaugeGain, ratingColor);
 
+    }
+
+    private void HandleTossFinished()
+    {
+        if (panController != null && panController.IsTechniqueToss)
+            return;
+        lastTossFinishedTime = Time.unscaledTime;
+        hasFinishedPreviousToss = true;
+    }
+
+    private void ShowTossTiming(string rating, float gaugeGain, Color color)
+    {
+        if (tossTimingText == null)
+            return;
+
+        tossTimingText.text = rating + "  +" + Mathf.RoundToInt(gaugeGain) + "%";
+        tossTimingText.color = color;
+        tossTimingText.enabled = true;
+        if (tossTimingRoutine != null)
+            StopCoroutine(tossTimingRoutine);
+        tossTimingRoutine = StartCoroutine(HideTossTiming());
+    }
+
+    private IEnumerator HideTossTiming()
+    {
+        yield return new WaitForSecondsRealtime(0.65f);
+        if (tossTimingText != null)
+            tossTimingText.enabled = false;
+        tossTimingRoutine = null;
     }
 
     private void BeginCommand()
@@ -181,6 +258,9 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         if (acceptingInput) return;
         if (panController != null) panController.SetControlLocked(true);
         StopAllCoroutines();
+        tossTimingRoutine = null;
+        if (tossTimingText != null)
+            tossTimingText.enabled = false;
         activeTechnique = selectedTechnique;
         commandIndex = 0;
         remainingTime = commandTime;
@@ -462,6 +542,15 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         Outline outline = gaugeText.gameObject.AddComponent<Outline>();
         outline.effectColor = new Color(0f, 0f, 0f, 0.95f);
         outline.effectDistance = new Vector2(2f, -2f);
+
+        tossTimingText = CreateText("TossTimingText", root.transform,
+            gaugeAnchor + new Vector2(0f, 0.14f), 38);
+        tossTimingText.fontStyle = FontStyle.Bold;
+        tossTimingText.rectTransform.sizeDelta = new Vector2(700f, 70f);
+        tossTimingText.enabled = false;
+        Outline timingOutline = tossTimingText.gameObject.AddComponent<Outline>();
+        timingOutline.effectColor = new Color(0f, 0f, 0f, 0.95f);
+        timingOutline.effectDistance = new Vector2(3f, -3f);
 
         BuildCornerHud(root.transform);
         BuildElementDiamondUi(root.transform);

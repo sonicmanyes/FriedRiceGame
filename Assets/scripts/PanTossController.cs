@@ -9,6 +9,7 @@ using UnityEngine.InputSystem;
 public sealed class PanTossController : MonoBehaviour
 {
     public bool CanActivateTechnique => !tossing && !controlLocked && !sessionLocked;
+    public bool IsTechniqueToss { get; private set; }
     public event Action TossStarted;
     public event Action TossFinished;
 
@@ -52,7 +53,7 @@ public sealed class PanTossController : MonoBehaviour
         if (!CanActivateTechnique)
             return false;
 
-        StartCoroutine(Toss());
+        StartCoroutine(Toss(true));
         return true;
     }
 
@@ -72,12 +73,13 @@ public sealed class PanTossController : MonoBehaviour
     private void Update()
     {
         if (TossKeyPressed() && !tossing && !controlLocked && !sessionLocked)
-            StartCoroutine(Toss());
+            StartCoroutine(Toss(false));
     }
 
-    private IEnumerator Toss()
+    private IEnumerator Toss(bool techniqueToss)
     {
         tossing = true;
+        IsTechniqueToss = techniqueToss;
         TossStarted?.Invoke();
         float elapsed = 0f;
 
@@ -132,6 +134,7 @@ public sealed class PanTossController : MonoBehaviour
         body.MoveRotation(restRotation);
         tossing = false;
         TossFinished?.Invoke();
+        IsTechniqueToss = false;
     }
 
     private static Vector3 QuadraticBezier(Vector3 start, Vector3 control, Vector3 end, float t)

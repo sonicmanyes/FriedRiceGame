@@ -52,7 +52,12 @@ public static class FriedRicePrototypeBuilder
                 SlowMotionCommandSystem commandSystem = pan.GetComponent<SlowMotionCommandSystem>();
                 SerializedObject commandData = new SerializedObject(commandSystem);
                 commandData.FindProperty("commandTime").floatValue = 3.5f;
-                commandData.FindProperty("gaugeGainPerToss").floatValue = 25f;
+                SerializedProperty goodGain = commandData.FindProperty("goodGaugeGain");
+                SerializedProperty greatGain = commandData.FindProperty("greatGaugeGain");
+                SerializedProperty perfectGain = commandData.FindProperty("perfectGaugeGain");
+                if (goodGain != null) goodGain.floatValue = 5f;
+                if (greatGain != null) greatGain.floatValue = 10f;
+                if (perfectGain != null) perfectGain.floatValue = 15f;
                 commandData.ApplyModifiedPropertiesWithoutUndo();
 
                 TornadoSpinTechnique tornadoTechnique = pan.GetComponent<TornadoSpinTechnique>();
