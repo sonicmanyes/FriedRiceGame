@@ -47,6 +47,7 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
     private PanTossController panController;
     private AudioSource windAudio;
     private AudioClip[] stageWhooshes;
+    private AudioClip maximumBurstWhoosh;
     private ParticleSystem windParticles;
     private Material windMaterial;
     private Camera mainCamera;
@@ -73,6 +74,7 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
             CreateWhooshClip("Tornado Stage 2", 0.58f, 1.00f, 4102),
             CreateWhooshClip("Tornado Stage 3", 0.82f, 1.28f, 4103)
         };
+        maximumBurstWhoosh = CreateWindBurstClip();
         BuildWindGaugeUi();
     }
 
@@ -101,6 +103,8 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
 
         foreach (AudioClip clip in stageWhooshes)
             if (clip != null) Destroy(clip);
+        if (maximumBurstWhoosh != null)
+            Destroy(maximumBurstWhoosh);
     }
 
     private void Perform()
@@ -130,7 +134,7 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
         GameObject vfxRoot = BuildTornadoVfx();
 
         float elapsed = 0f;
-        while (elapsed < mashDuration)
+        while (elapsed < mashDuration && windStage < 3)
         {
             elapsed += Time.deltaTime;
             bool acceptingMash = elapsed >= mashInputDelay;
@@ -146,7 +150,10 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
 
         CacheFinishPositions();
         if (windStage >= 3)
+        {
+            StartCoroutine(LaunchTornadoSkyward());
             yield return BlowUpAndRainDown();
+        }
         else
             yield return CollapseIntoPan();
 
@@ -234,8 +241,8 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
             TrailRenderer trail = arm.AddComponent<TrailRenderer>();
             trail.time = 0.55f;
             trail.minVertexDistance = 0.025f;
-            trail.startWidth = 0.11f;
-            trail.endWidth = 0.015f;
+            trail.startWidth = 0.06f;
+            trail.endWidth = 0.008f;
             trail.numCornerVertices = 4;
             trail.sharedMaterial = windMaterial;
             trail.startColor = tornadoColor;
@@ -280,7 +287,7 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
             float armRadius = radius * Mathf.Lerp(0.34f, 1f, verticalCycle);
             trail.transform.position = transform.position + Vector3.up * (0.15f + height * verticalCycle)
                 + new Vector3(Mathf.Cos(phase) * armRadius, 0f, Mathf.Sin(phase) * armRadius);
-            trail.startWidth = Mathf.Lerp(0.07f, 0.22f, strength);
+            trail.startWidth = Mathf.Lerp(0.035f, 0.105f, strength);
             trail.time = Mathf.Lerp(0.35f, 0.78f, strength);
         }
 
@@ -368,6 +375,63 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
                 data.body.transform.Rotate(Vector3.one, 720f * Time.deltaTime, Space.World);
             }
             yield return null;
+        }
+    }
+
+    private IEnumerator LaunchTornadoSkyward()
+    {
+        if (windAudio != null && maximumBurstWhoosh != null)
+            windAudio.PlayOneShot(maximumBurstWhoosh, 1f);
+
+        if (windParticles != null)
+        {
+            windParticles.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
+            ParticleSystem.EmissionModule emission = windParticles.emission;
+            emission.rateOverTime = 280f;
+            ParticleSystem.ShapeModule shape = windParticles.shape;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle = 11f;
+            shape.radius = 0.68f;
+            ParticleSystem.MainModule main = windParticles.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.32f, 0.78f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(7f, 13f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.055f, 0.17f);
+            windParticles.Emit(240);
+        }
+
+        const float launchDuration = 0.52f;
+        float elapsed = 0f;
+        Vector3 center = transform.position;
+        while (elapsed < launchDuration)
+        {
+            elapsed += Time.deltaTime;
+            float ratio = Mathf.Clamp01(elapsed / launchDuration);
+            float riseSpeed = Mathf.Lerp(5.5f, 16f, ratio);
+            float spinDegrees = Mathf.Lerp(520f, 920f, ratio) * Time.deltaTime;
+            float shrink = Mathf.Clamp01(1f - Time.deltaTime * Mathf.Lerp(0.8f, 2.8f, ratio));
+
+            foreach (TrailRenderer trail in spiralTrails)
+            {
+                if (trail == null) continue;
+                Vector3 position = trail.transform.position;
+                Vector3 horizontal = position - center;
+                float height = horizontal.y + riseSpeed * Time.deltaTime;
+                horizontal.y = 0f;
+                horizontal = Quaternion.AngleAxis(spinDegrees, Vector3.up) * horizontal * shrink;
+                trail.transform.position = center + horizontal + Vector3.up * height;
+                trail.startWidth = Mathf.Lerp(trail.startWidth, 0.008f, ratio);
+                trail.time = Mathf.Lerp(0.62f, 0.12f, ratio);
+            }
+            yield return null;
+        }
+
+        foreach (TrailRenderer trail in spiralTrails)
+            if (trail != null) trail.emitting = false;
+
+        if (windParticles != null)
+        {
+            ParticleSystem.EmissionModule emission = windParticles.emission;
+            emission.rateOverTime = 0f;
         }
     }
 
@@ -494,7 +558,9 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
         windGaugeFillRect.anchorMax = new Vector2(ratio, 1f);
         windGaugeFillRect.offsetMin = Vector2.zero;
         windGaugeFillRect.offsetMax = Vector2.zero;
-        windGaugeText.text = "WIND LEVEL " + shownLevel + "     A  MASH!";
+        windGaugeText.text = shownLevel >= 3
+            ? "WIND MAX!!"
+            : "WIND LEVEL " + shownLevel + "     A  MASH!";
         windGaugeText.color = shownLevel == 3
             ? new Color(0.75f, 1f, 0.25f)
             : Color.white;
@@ -534,6 +600,34 @@ public sealed class TornadoSpinTechnique : MonoBehaviour
             samples[i] = Mathf.Clamp((filtered * 0.72f + sweep * 0.16f) * envelope, -0.95f, 0.95f);
         }
         AudioClip clip = AudioClip.Create(name, count, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
+    }
+
+    private static AudioClip CreateWindBurstClip()
+    {
+        const int sampleRate = 44100;
+        const float duration = 1.05f;
+        int count = Mathf.RoundToInt(sampleRate * duration);
+        float[] samples = new float[count];
+        var random = new System.Random(7813);
+        float lowNoise = 0f;
+        float highNoise = 0f;
+        for (int i = 0; i < count; i++)
+        {
+            float time = i / (float)sampleRate;
+            float normalized = time / duration;
+            float noise = (float)(random.NextDouble() * 2.0 - 1.0);
+            lowNoise = Mathf.Lerp(lowNoise, noise, 0.028f);
+            highNoise = Mathf.Lerp(highNoise, noise, 0.16f);
+            float attack = Mathf.Clamp01(normalized / 0.035f);
+            float decay = Mathf.Pow(1f - normalized, 1.7f);
+            float gust = lowNoise * 0.72f + highNoise * 0.24f;
+            float impact = Mathf.Sin(2f * Mathf.PI * 82f * time) * Mathf.Exp(-time * 8f) * 0.35f;
+            samples[i] = Mathf.Clamp((gust * decay + impact) * attack, -0.98f, 0.98f);
+        }
+
+        AudioClip clip = AudioClip.Create("Tornado Maximum Wind Burst", count, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;
     }

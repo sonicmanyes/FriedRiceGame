@@ -40,8 +40,10 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
 
     [Header("Score and cooldown")]
     [SerializeField, Min(1f)] private float cooldownDuration = 10f;
-    [SerializeField] private int tossScore = 100;
-    [SerializeField] private int dragonRiseSuccessScore = 1000;
+    [SerializeField, Min(0)] private int goodTossScore = 100;
+    [SerializeField, Min(0)] private int greatTossScore = 300;
+    [SerializeField, Min(0)] private int perfectTossScore = 500;
+    [SerializeField] private int dragonRiseSuccessScore = 5000;
     [SerializeField] private int tornadoSpinBaseScore = 300;
 
     [Header("Editable UI text")]
@@ -195,32 +197,36 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         float timingError = Mathf.Abs(elapsedAfterLanding - perfectLandingDelay);
         string rating;
         float gaugeGain;
+        int timingScore;
         Color ratingColor;
 
         if (hasFinishedPreviousToss && timingError <= perfectTimingWindow)
         {
             rating = "PERFECT";
             gaugeGain = perfectGaugeGain;
+            timingScore = perfectTossScore;
             ratingColor = new Color(1f, 0.72f, 0.08f);
         }
         else if (hasFinishedPreviousToss && timingError <= greatTimingWindow)
         {
             rating = "GREAT";
             gaugeGain = greatGaugeGain;
+            timingScore = greatTossScore;
             ratingColor = new Color(0.25f, 0.9f, 1f);
         }
         else
         {
             rating = "GOOD";
             gaugeGain = goodGaugeGain;
+            timingScore = goodTossScore;
             ratingColor = Color.white;
         }
 
         techniqueGauge = Mathf.Min(100f, techniqueGauge + gaugeGain);
-        score += tossScore;
+        score += timingScore;
         RefreshGaugeUi();
         RefreshCornerHud();
-        ShowTossTiming(rating, gaugeGain, ratingColor);
+        ShowTossTiming(rating, ratingColor);
 
     }
 
@@ -232,12 +238,12 @@ public sealed class SlowMotionCommandSystem : MonoBehaviour
         hasFinishedPreviousToss = true;
     }
 
-    private void ShowTossTiming(string rating, float gaugeGain, Color color)
+    private void ShowTossTiming(string rating, Color color)
     {
         if (tossTimingText == null)
             return;
 
-        tossTimingText.text = rating + "  +" + Mathf.RoundToInt(gaugeGain) + "%";
+        tossTimingText.text = rating;
         tossTimingText.color = color;
         tossTimingText.enabled = true;
         if (tossTimingRoutine != null)
