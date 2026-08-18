@@ -6,6 +6,12 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/TitleScene.unity
+    guid: 6f1c5bd50777adb498731672f30e896c
+  - enabled: 1
+    path: Assets/Scenes/StoryScene.unity
+    guid: 4c4c4c883146727499632f225ab901fc
+  - enabled: 1
     path: Assets/Scenes/FriedRicePrototype.unity
     guid: 3a62c724d84afdd46be6b510e266e0f5
   - enabled: 1
